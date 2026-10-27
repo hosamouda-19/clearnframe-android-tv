@@ -48,7 +48,7 @@
   var LOOK_VALUES = { bg: ['dark', 'light', 'photo'], layout: ['list', 'dock'], apps: ['icons', 'both', 'text'], font: Object.keys(FONTS).filter(function (id) { return id === 'manrope' || PRIVATE_FONTS.indexOf(id) >= 0; }), controls: ['icons', 'both', 'text'], focus: ['type', 'glass'], material: ['soft', 'frost', 'tint'] };
   var LOOK_NAMES = { bg: 'Background', layout: 'Layout', apps: 'Apps', font: 'Font', controls: 'Home controls', focus: 'Focus', material: 'Material' };
   var VALUE_NAMES = { dark: 'Dark', light: 'Light', photo: 'Photo', list: 'List', dock: 'Dock', type: 'Type', glass: 'Glass', soft: 'Soft', frost: 'Frost', tint: 'Clear tint', icons: 'Icons', both: 'Icons and text', text: 'Text' };
-  var UTIL = { art: ['Screensaver', 'art'], apps: ['All apps', 'apps'], arrange: ['Arrange', 'arrange'], settings: ['Settings', 'settings'] };
+  var UTIL = { inputs: ['Inputs', 'inputs'], art: ['Screensaver', 'art'], apps: ['All apps', 'apps'], arrange: ['Arrange', 'arrange'], settings: ['Settings', 'settings'] };
   var MSG = {
     leave: { title: 'Leave Home?', line: 'Open the system home?', note: '', actions: [['stay', 'Stay'], ['samsung', 'System home']] }
   };
@@ -57,6 +57,7 @@
     apps: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/>',
     arrange: '<path d="M4 8.5h14M15 5.5l3 3-3 3M20 15.5H6M9 12.5l-3 3 3 3"/>',
     settings: '<path d="m9 3-.6 2.4-2 1.2L4 6l-2 3.5L3.8 11v2L2 14.5 4 18l2.4-.6 2 1.2L9 21h6l.6-2.4 2-1.2 2.4.6 2-3.5-1.8-1.5v-2L22 9.5 20 6l-2.4.6-2-1.2L15 3Z"/><circle cx="12" cy="12" r="3.2"/>',
+    inputs: '<path d="M4 12h10M10.5 8.5 14 12l-3.5 3.5"/><path d="M14 5h4.5A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5H14"/>',
     home: '<path d="M4 11 12 4.5l8 6.5v8a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1Z"/>',
     undo: '<path d="M9 6 5 10l4 4"/><path d="M5 10h9.5a4.5 4.5 0 0 1 0 9H11"/>',
     check: '<path d="m5.5 12.5 4 4 9-9"/>',
@@ -491,16 +492,40 @@
   }
 
   /* ---------- Navigation targets ---------- */
-  function utils() { return ['art', 'apps', 'settings']; }
+  function utils() { return ['inputs', 'art', 'apps', 'settings']; }
   /* prev/next run along the apps; out goes to the controls, inn comes back (or to a per-app action). */
   function axes() {
     var v = S.c.layout === 'list';
     return { prev: v ? 'up' : 'left', next: v ? 'down' : 'right', out: v ? 'right' : 'up', inn: v ? 'left' : 'down' };
   }
   function utilAction(u) {
-    if (u === 'art') perform('Screensaver', FrameDevice.art);
+    if (u === 'inputs') openAppearance('inputs');
+    else if (u === 'art') perform('Screensaver', FrameDevice.art);
     else if (u === 'apps') openApps();
     else openSettings();
+  }
+  var INPUTS = [], inputsState = { loading: false, loaded: false, error: '' };
+  function refreshInputs() {
+    if (inputsState.loading) return;
+    inputsState.loading = true; inputsState.error = '';
+    FrameDevice.inputs(function (err, list) {
+      inputsState.loading = false; inputsState.loaded = true;
+      if (err) { INPUTS = []; inputsState.error = err.message || 'Could not read inputs.'; }
+      else INPUTS = list || [];
+      render();
+    });
+  }
+  var STATUS = null;
+  function refreshStatus() {
+    FrameDevice.status(function (err, st) { STATUS = err ? null : st; render(); });
+  }
+  function netText() {
+    if (!STATUS) return '';
+    return { wifi: 'Connected by Wi-Fi', ethernet: 'Connected by cable', other: 'Connected', none: 'Not connected' }[STATUS.network] || '';
+  }
+  function btText() {
+    if (!STATUS) return '';
+    return { on: 'On', off: 'Off', none: 'Not available on this TV' }[STATUS.bluetooth] || '';
   }
   function addAppsRoute() { openEditor('home'); }
   function openSettings() { push({ id: 'settings', f: { id: S.settingsFocus } }); }
@@ -508,6 +533,8 @@
     var axis = { background: 'bg', layout: 'layout', typography: 'font', focus: 'focus' }[group];
     var action = S.detailFocus[group] || (axis ? 'choice.' + axis + '.' + S.c[axis] : group === 'rotation' ? 'rotation.' + S.c.mode : 'samsung.home');
     push({ id: 'appearance', group: group, f: { action: action } });
+    if (group === 'inputs') refreshInputs();
+    if (group === 'samsung') refreshStatus();
   }
   function openMessage(key) { push({ id: 'message', msg: key, f: { b: 0 } }); }
   function openApps() {
@@ -821,7 +848,7 @@
       { id: 'typography', label: 'Typography', value: FONTS[S.c.font].name },
       { id: 'focus', label: 'Focus', value: VALUE_NAMES[S.c.focus] + (materialApplies() ? ', ' + VALUE_NAMES[S.c.material] : '') },
       { id: 'editor', label: 'Apps on Home', value: n + (n === 1 ? ' app' : ' apps') },
-      { id: 'samsung', label: 'System', value: 'Home and TV settings' }];
+      { id: 'samsung', label: 'System', value: 'Wi-Fi, info and TV settings' }];
   }
   function settingsIds() { return settingsRows().map(function (r) { return r.id; }); }
   V.settings = {
@@ -841,7 +868,8 @@
     if (id === 'editor') openEditor('settings');
     else openAppearance(id);
   }
-  var DETAIL_NAMES = { background: 'Background', layout: 'Layout', typography: 'Typography', focus: 'Focus', rotation: 'Rotation', samsung: 'System' };
+  var DETAIL_NAMES = { background: 'Background', layout: 'Layout', typography: 'Typography', focus: 'Focus', rotation: 'Rotation', samsung: 'System', inputs: 'Inputs' };
+  function backName(t) { return t.group === 'rotation' ? 'Background' : t.group === 'inputs' ? 'Home' : 'Settings'; }
   function choice(axis, value, disabled) {
     return { action: axis === 'mode' ? 'rotation.' + value : 'choice.' + axis + '.' + value, axis: axis, value: value, disabled: !!disabled,
       label: axis === 'font' ? FONTS[value].name : axis === 'mode' ? MODES.filter(function (m) { return m.id === value; })[0].name : value === 'both' ? 'Both' : VALUE_NAMES[value] };
@@ -867,13 +895,24 @@
     ];
     if (t.group === 'rotation') return [{ id: 'mode', title: '', items: options('mode', MODES.map(function (m) { return m.id; }), flat),
       reason: flat ? 'Choose Photo in Background to use rotation.' : 'Timed changes pause while Settings or another panel is open.' }];
+    if (t.group === 'inputs') {
+      var list = INPUTS.map(function (inp, n) { return { action: 'input.go.' + n, label: inp.label }; });
+      return [{ id: 'inputs', title: '', items: list,
+        reason: inputsState.loading || !inputsState.loaded ? 'Looking for inputs…' : inputsState.error ? inputsState.error
+          : !list.length ? 'This TV does not share its HDMI or AV inputs with apps. Use the Source button on the remote.' : 'Select an input to switch to it.' }];
+    }
     return [{ id: 'samsung', title: '', items: [
-      { action: 'samsung.home', label: 'System home', description: 'Open the original home screen' },
-      { action: 'samsung.settings', label: 'TV settings', description: 'Picture, sound and network settings' }
+      { action: 'samsung.home', label: 'System home' },
+      { action: 'sys.wifi', label: 'Wi-Fi and network', description: netText() },
+      { action: 'sys.about', label: 'System information' },
+      { action: 'sys.bluetooth', label: 'Bluetooth', description: btText() },
+      { action: 'sys.display', label: 'Display' },
+      { action: 'sys.sound', label: 'Sound' },
+      { action: 'samsung.settings', label: 'All TV settings' }
     ] }];
   }
   function detailRows(t) {
-    var rows = [[{ action: 'settings.back', label: t.group === 'rotation' ? 'Background' : 'Settings' }]];
+    var rows = [[{ action: 'settings.back', label: backName(t) }]];
     detailSections(t).forEach(function (section) {
       var enabled = section.items.filter(function (item) { return !item.disabled; });
       if (section.horizontal && enabled.length) rows.push(enabled);
@@ -916,6 +955,11 @@
     else if (item.action === 'background.rotation') openAppearance('rotation');
     else if (item.action === 'samsung.home') perform('System home', FrameDevice.home);
     else if (item.action === 'samsung.settings') perform('TV settings', FrameDevice.settings);
+    else if (item.action.indexOf('sys.') === 0) perform(item.label, function (done) { FrameDevice.openSystem(item.action.slice(4), done); });
+    else if (item.action.indexOf('input.go.') === 0) {
+      var inp = INPUTS[parseInt(item.action.slice(9), 10)];
+      if (inp) perform(inp.label, function (done) { FrameDevice.switchInput(inp.id, done); });
+    }
   }
   V.appearance = {
     norm: function (t) {
@@ -1393,7 +1437,7 @@
         + ' data-z="detail" data-i="0" data-id="' + item.action + '" data-action="' + item.action + '">' + inner
         + (item.axis ? '<span class="setting-tick" aria-hidden="true">' + (applied ? icon('check') : '') + '</span>' : '') + '</button>';
     }
-    setHTML(appearanceBack, command({ action: 'settings.back', label: t.group === 'rotation' ? 'Background' : 'Settings' }, icon('left') + '<span>' + (t.group === 'rotation' ? 'Background' : 'Settings') + '</span>', 'setting-back'));
+    setHTML(appearanceBack, command({ action: 'settings.back', label: backName(t) }, icon('left') + '<span>' + (backName(t)) + '</span>', 'setting-back'));
     setHTML(appearanceRows, detailSections(t).map(function (section) {
       return '<section class="setting-section' + (section.horizontal ? ' is-horizontal' : '') + ' section-' + section.id + '">'
         + (section.title ? '<h3 class="setting-label" id="setting-' + section.id + '">' + section.title + '</h3>' : '')
@@ -1416,7 +1460,7 @@
         + command({ action: 'settings.retry', label: 'Try again' }, '<span>Try again</span>', 'setting-retry');
     }
     setHTML(appearanceStatus, status);
-    hint = selected.disabled ? '' : selected.action === 'settings.back' ? 'Return to ' + (t.group === 'rotation' ? 'Background' : 'Settings') : selected.action === 'settings.retry' ? 'Retry this change' : selected.axis ? 'Apply selected setting' : selected.action === 'background.wallpaper' ? 'Choose a wallpaper' : selected.action === 'background.rotation' ? 'Choose a rotation interval' : 'Open on the TV';
+    hint = selected.disabled ? '' : selected.action === 'settings.back' ? 'Return to ' + (backName(t)) : selected.action.indexOf('input.go.') === 0 ? 'Switch to this input' : selected.action.indexOf('sys.') === 0 || selected.action.indexOf('samsung.') === 0 ? 'Open' : selected.action === 'settings.retry' ? 'Retry this change' : selected.axis ? 'Apply selected setting' : selected.action === 'background.wallpaper' ? 'Choose a wallpaper' : selected.action === 'background.rotation' ? 'Choose a rotation interval' : 'Open on the TV';
     setHTML(appearanceDesc, hint ? '<span class="remote-key">OK</span><span>' + esc(hint) + '</span>' : '');
   }
   function renderWallpaper(t) {

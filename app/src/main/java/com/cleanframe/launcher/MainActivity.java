@@ -8,6 +8,15 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.media.tv.TvContract;
+import android.media.tv.TvInputInfo;
+import android.media.tv.TvInputManager;
+import android.content.ActivityNotFoundException;
+import android.content.Context;
+import android.bluetooth.BluetoothAdapter;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -136,7 +145,90 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** Tries each intent in turn on the UI thread; the first one the system accepts wins. */
+    private void startFirst(final Intent... options) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                for (Intent i : options) {
+                    try {
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(i);
+                        return;
+                    } catch (ActivityNotFoundException | SecurityException ignored) { }
+                }
+            }
+        });
+    }
+
     private class Bridge {
+        /** Connection and Bluetooth state, for the System screen. No location permission is needed. */
+        @JavascriptInterface
+        public String getStatus() {
+            JSONObject o = new JSONObject();
+            try {
+                String net = "none";
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                if (cm != null) {
+                    Network n = cm.getActiveNetwork();
+                    NetworkCapabilities c = n == null ? null : cm.getNetworkCapabilities(n);
+                    if (c != null) {
+                        if (c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) net = "ethernet";
+                        else if (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) net = "wifi";
+                        else net = "other";
+                    }
+                }
+                o.put("network", net);
+                BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();
+                o.put("bluetooth", bt == null ? "none" : (bt.isEnabled() ? "on" : "off"));
+            } catch (Exception ignored) { }
+            return o.toString();
+        }
+
+        @JavascriptInterface
+        public String getInputs() {
+            JSONArray out = new JSONArray();
+            try {
+                TvInputManager tv = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
+                if (tv == null) return out.toString();
+                for (TvInputInfo info : tv.getTvInputList()) {
+                    if (!info.isPassthroughInput()) continue;
+                    CharSequence custom = info.loadCustomLabel(MainActivity.this);
+                    CharSequence label = (custom != null && custom.length() > 0) ? custom : info.loadLabel(MainActivity.this);
+                    JSONObject o = new JSONObject();
+                    o.put("id", info.getId());
+                    o.put("label", String.valueOf(label));
+                    o.put("type", info.getType());
+                    out.put(o);
+                }
+            } catch (Exception ignored) { }
+            return out.toString();
+        }
+
+        @JavascriptInterface
+        public boolean switchInput(String inputId) {
+            try {
+                Uri uri = TvContract.buildChannelUriForPassthroughInput(inputId);
+                startFirst(new Intent(Intent.ACTION_VIEW, uri));
+                return true;
+            } catch (Exception e) { return false; }
+        }
+
+        /** Opens a Settings page; falls back to the main Settings app when the TV build lacks that page. */
+        @JavascriptInterface
+        public boolean openSetting(String kind) {
+            String action;
+            switch (kind) {
+                case "wifi": action = Settings.ACTION_WIFI_SETTINGS; break;
+                case "about": action = Settings.ACTION_DEVICE_INFO_SETTINGS; break;
+                case "bluetooth": action = Settings.ACTION_BLUETOOTH_SETTINGS; break;
+                case "display": action = Settings.ACTION_DISPLAY_SETTINGS; break;
+                case "sound": action = Settings.ACTION_SOUND_SETTINGS; break;
+                default: action = Settings.ACTION_SETTINGS;
+            }
+            startFirst(new Intent(action), new Intent(Settings.ACTION_SETTINGS));
+            return true;
+        }
+
         @JavascriptInterface
         public String getApps() {
             PackageManager pm = getPackageManager();
@@ -172,12 +264,9 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public boolean screensaver() {
-            Intent dream = new Intent(Intent.ACTION_MAIN)
-                    .setClassName("com.android.systemui", "com.android.systemui.Somnambulator");
-            if (getPackageManager().resolveActivity(dream, 0) != null) { start(dream); return true; }
-            Intent s = new Intent(Settings.ACTION_DREAM_SETTINGS);
-            if (getPackageManager().resolveActivity(s, 0) != null) { start(s); return true; }
-            return settings();
+            startFirst(new Intent(Intent.ACTION_MAIN).setClassName("com.android.systemui", "com.android.systemui.Somnambulator"),
+                    new Intent(Settings.ACTION_DREAM_SETTINGS), new Intent(Settings.ACTION_SETTINGS));
+            return true;
         }
 
         @JavascriptInterface

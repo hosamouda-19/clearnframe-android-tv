@@ -46,5 +46,17 @@
       done(null, result);
     } catch (err) { done(failure(err)); }
   }
-  window.FrameDevice = { launch: launch, launchApp: launchApp, art: art, home: home, settings: settings, apps: apps };
+  function inputs(done) {
+    var b = bridge();
+    if (!b) { unavailable(done); return; }
+    try { done(null, JSON.parse(b.getInputs())); } catch (err) { done(failure(err)); }
+  }
+  function status(done) {
+    var b = bridge();
+    if (!b) { unavailable(done); return; }
+    try { done(null, JSON.parse(b.getStatus())); } catch (err) { done(failure(err)); }
+  }
+  function switchInput(id, done) { call('switchInput', id, done); }
+  function openSystem(kind, done) { call('openSetting', kind, done); }
+  window.FrameDevice = { status: status, inputs: inputs, switchInput: switchInput, openSystem: openSystem, launch: launch, launchApp: launchApp, art: art, home: home, settings: settings, apps: apps };
 }());
